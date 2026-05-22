@@ -23,6 +23,33 @@ import { createBillingCheckoutSession } from '@/services/billingServices';
 
 const PLACEHOLDER_IMAGE = '/images/vehicles/car_placeholder.png';
 
+// Sanitize backend error messages before showing them to the renter.
+// Raw Stripe / DRF errors can include scary low-level details
+// ("UnicodeEncodeError ... codec can't encode character ...") AND,
+// when keys are misconfigured, can echo the offending Stripe key right
+// back into the response. Both are surface area we should never put in
+// front of a customer. This helper redacts key-shaped tokens and folds
+// common SDK noise down to a generic, customer-safe message.
+const sanitizeBackendError = (raw?: string | null): string => {
+  if (!raw) {
+    return 'Verification is temporarily unavailable. Please try again or contact support.';
+  }
+  // Redact anything that looks like a Stripe key / webhook secret so a
+  // misconfigured-key error can't leak the value to the customer.
+  const stripped = String(raw).replace(
+    /\b(sk|pk|rk|whsec)_[A-Za-z0-9_-]+/g,
+    '[redacted]',
+  );
+  if (
+    /UnicodeEncodeError|latin-1|codec|communicating with Stripe|Network error|configuration issue/i.test(
+      stripped,
+    )
+  ) {
+    return 'Verification is temporarily unavailable. Please try again or contact support.';
+  }
+  return stripped.length > 200 ? stripped.slice(0, 197) + '…' : stripped;
+};
+
 export default function BookingDetailsPage() {
   const params = useParams();
   const searchParams = useSearchParams();
@@ -163,7 +190,7 @@ export default function BookingDetailsPage() {
           const message = (error as { response?: { data?: { errors?: { non_field_errors?: string[] } } } })
             ?.response?.data?.errors?.non_field_errors?.[0]
             || 'Failed to create verification session. Please try again.';
-          setIdVerificationError(message);
+          setIdVerificationError(sanitizeBackendError(message));
         },
       }
     );
@@ -204,7 +231,7 @@ export default function BookingDetailsPage() {
               }
             }
           }
-          setInsuranceVerificationError(message);
+          setInsuranceVerificationError(sanitizeBackendError(message));
         },
       }
     );
