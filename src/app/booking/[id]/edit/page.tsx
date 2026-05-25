@@ -232,6 +232,16 @@ export default function EditTripPage() {
   const modificationFee = preview?.modification_fee ? parseFloat(preview.modification_fee) : 0;
   const newTotal = preview?.new_total ? parseFloat(preview.new_total) : null;
 
+  // A trip is "ongoing" the moment its original pickup window has
+  // passed — you can't move pickup backwards (the customer already
+  // took the keys) so the picker locks it. Without this lock the
+  // range calendar lets the renter reset BOTH ends, which silently
+  // turns a "1-day extension" (old 21→22, new 21→23) into a 1-day
+  // shift (new 22→23) for the pricing engine — net diff $0 and a
+  // very confused customer.
+  const isOngoing = !!booking?.pickUp.rawDatetime
+    && new Date(booking.pickUp.rawDatetime).getTime() <= Date.now();
+
   return (
     <>
       <Header />
@@ -275,12 +285,16 @@ export default function EditTripPage() {
 
         {/* Date Pickers */}
         <div className="mt-8 space-y-4">
-          {/* Pick-up */}
+          {/* Pick-up — locked once the trip has started so the customer
+              can only extend / shorten the return, not retroactively
+              move pickup. */}
           <div
-            className="w-full rounded-2xl bg-gray-50 px-5 py-4 text-left cursor-pointer"
-            onClick={() => setCalendarOpen(!calendarOpen)}
+            className={`w-full rounded-2xl bg-gray-50 px-5 py-4 text-left ${isOngoing ? 'cursor-not-allowed opacity-75' : 'cursor-pointer'}`}
+            onClick={isOngoing ? undefined : () => setCalendarOpen(!calendarOpen)}
           >
-            <p className="mb-3 text-2xs font-normal text-neutral-label">Pick-up Date & Time</p>
+            <p className="mb-3 text-2xs font-normal text-neutral-label">
+              Pick-up Date & Time{isOngoing ? ' (locked — trip has started)' : ''}
+            </p>
             <div className="flex items-center">
               <div className="flex flex-1 items-center gap-2">
                 <Image src="/icons/home/hero/calendar.svg" alt="Calendar" width={20} height={20} className="shrink-0" />
@@ -294,6 +308,7 @@ export default function EditTripPage() {
                   <TimePicker
                     value={pickupTime}
                     onChange={setPickupTime}
+                    disabled={isOngoing}
                     icon={<Image src="/icons/home/hero/clock.svg" alt="Clock" width={18} height={18} className="shrink-0" />}
                     placeholder="Select Time"
                     aria-label="Pickup time"
@@ -303,12 +318,18 @@ export default function EditTripPage() {
             </div>
           </div>
 
-          {/* Range Calendar */}
+          {/* Range Calendar — for ongoing trips, both onSelectStart and
+              onSelectEnd update the dropoff so the locked pickup never
+              moves and any click on the calendar is interpreted as a
+              new return date. */}
           <DualMonthCalendar
             isOpen={calendarOpen}
             startDate={pickupDate}
             endDate={dropoffDate}
-            onSelectStart={(v) => { setPickupDate(v); setDropoffDate(''); }}
+            onSelectStart={isOngoing
+              ? (v) => { setDropoffDate(v); setCalendarOpen(false); }
+              : (v) => { setPickupDate(v); setDropoffDate(''); }
+            }
             onSelectEnd={(v) => { setDropoffDate(v); setCalendarOpen(false); }}
             minDate={todayLocalISODate()}
             unavailableDates={unavailableDates}
